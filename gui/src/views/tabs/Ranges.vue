@@ -20,30 +20,15 @@
       </div>
     </b-field>
 
-    <b-table class="monospace" :data="list" :narrowed="true" :hasDetails="false" :paginated="paginator > 0" :per-page="paginator" :loading="loading" default-sort="name">
-      <template scope="props">
-        <b-table-column field="baseAddress" label="Base" sortable>
-          {{ props.row.baseAddress.value.toString(16) }}
-        </b-table-column>
-
-        <b-table-column field="size" label="Size" sortable>
-          {{ props.row.size }}
-        </b-table-column>
-
-        <b-table-column field="protection" label="Protection">
-          {{ props.row.protection }}
-        </b-table-column>
-      </template>
-
-      <div slot="empty" class="has-text-centered">
-        No matching range
-      </div>
-    </b-table>
-
+    <div ref="chart" class="chart"></div>
   </div>
 </template>
 
 <script>
+
+import * as d3 from 'd3'
+import { interpolateGreys } from 'd3-scale-chromatic'
+
 import { mapGetters } from 'vuex'
 import { GET_SOCKET } from '~/vuex/types'
 
@@ -54,7 +39,6 @@ export default {
   data() {
     return {
       list: [],
-      filtered: [],
       loading: true,
       paginator: 100,
       filter: {
@@ -62,6 +46,7 @@ export default {
         w: false,
         r: true,
       },
+      chart: null,
     }
   },
   computed: {
@@ -73,6 +58,9 @@ export default {
     socket(val, old) {
       this.load(socket)
     },
+    list(val, old) {
+      this.draw(val)
+    },
     filter: {
       handler() {
         this.load()
@@ -81,27 +69,91 @@ export default {
     },
   },
   methods: {
+    draw(list) {
+      let container = d3.select(this.$refs.chart)
+      container.select('svg').remove()
+
+      let svg = this.chart = container.append('svg')
+        .attr('width', this.$refs.chart.clientWidth)
+        .attr('height', this.$refs.chart.clientHeight)
+
+      let filled = []
+      let floor = 0
+      let ceil = list.reduce((sum, range, index, arr) => {
+        let { baseAddress, protection, size } = range
+        let base = baseAddress.value
+        if (sum > 0) {
+          let gap = base - sum
+          if (gap > 0) {
+            filled.push({ base: sum, size: gap, type: 'gap'})
+          }
+          filled.push({ base , size, protection })
+        } else {
+          floor = base
+        }
+        return base + size
+      }, 0)
+
+      let width = svg.attr('width'), height = svg.attr('height'), groupHeight = height / 3
+      let stack = d3.stack().keys(['base', 'size'])
+      let scale = d3.scaleLinear().domain([floor, ceil]).range([0, width])
+
+      let groups = svg.selectAll('g')
+        .data('rwx'.split(''))
+        .enter()
+        .append('g')
+        .attr('fill', '#ddd')
+        .attr('x', 0)
+        .attr('y', (d, i) => i * groupHeight)
+        .attr('height', groupHeight)
+
+      groups.selectAll('rect')
+        .data(d => filled)
+        .enter()
+        .append('rect')
+        .attr('fill', (d, j) => interpolateGreys(scale(d.base) / scale(ceil)))
+        .attr('x', d => scale(d.base))
+        .attr('height', groupHeight)
+        .attr('width', d => scale(d.base + d.size) - scale(d.base))
+
+    },
+    onResize() {
+      if (!this.chart)
+        return
+
+      this.chart
+        .attr('width', this.$refs.chart.clientWidth)
+        .attr('height', this.$refs.chart.clientHeight)
+
+      this.draw(this.list)
+    },
     load(socket) {
       let protection = Object.keys(this.filter)
         .filter(key => this.filter[key])
         .join('')
 
       this.loading = true
-      socket.emit('ranges', { protection: protection }, ranges => {
+      this.socket.emit('ranges', { protection: protection }, ranges => {
         this.list = ranges
         this.loading = false
       })
     },
   },
   mounted() {
+    window.addEventListener('resize', this.onResize)
+    this.onResize()
     this.load(this.socket)
+  },
+  beforeDestroy() {
+    window.removeEventListener('resize', this.onResize)
   }
 }
 </script>
 
 <style lang="scss">
-.ranges {
-  max-width: 720px;
-  margin: auto;
+
+.chart {
+  width: 100%;
+  height: 60px;
 }
 </style>
