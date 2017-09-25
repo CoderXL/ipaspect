@@ -5,7 +5,7 @@ import imports from './imports'
 import { info } from './info'
 import { classes, methods } from './classdump'
 import { ls, home, plist, text } from './finder'
-
+import { tables, data, query } from './sqlite'
 
 rpc.exports = {
   checksec,
@@ -20,4 +20,8 @@ rpc.exports = {
   home,
   plist,
   text,
+
+  tables,
+  data,
+  query,
 }
